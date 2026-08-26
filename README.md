@@ -1,13 +1,10 @@
-# SightLine
-
+# Nux
 
 ---
 
-**A real-time AI visual companion for visually impaired users, built on Gemini Live.**
+**A real-time collaborative agent that works with you — built on Gemini Live.**
 
-Most AI accessibility tools work in batch. You take a photo, wait a few seconds, get a description, and ask your follow-up into the void. By the time the answer comes back, the moment is gone — you've already crossed the street, missed the sign, lost the conversation.
-
-SightLine runs continuously. Point your camera, speak naturally, and Gemini sees what you see and talks back in real time. Not a request-response loop. An actual live conversation — with context, follow-ups, and no manual triggers.
+Nux runs continuously in one live session. Point your camera, share your screen when you choose, speak naturally, and the agent sees what you show it, remembers what you ask it to, and draws diagrams when you need to go deeper. Not a chatbot. A collaborative presence — it works alongside you, not instead of you.
 
 ---
 
@@ -17,31 +14,94 @@ SightLine runs continuously. Point your camera, speak naturally, and Gemini sees
 **API docs:** https://sightline-backend-59597652459.europe-west1.run.app/docs  
 **Demo video:** [Watch on YouTube](https://www.youtube.com/watch?v=hW1gJ22O3Zs)
 
+> Cloud Run service names are still `sightline-*` until you rename/redeploy (see [Renaming Sightline → Nux](#renaming-sightline--nux) below). The product UI and docs brand is **Nux**.
+
 ---
 
 ## What it does
 
 ```
-"What's in front of me? Is there anything I should be careful of?"
+"What is photosynthesis?" → remember this → look at my notes → draw how it works
 ```
 
 One continuous WebSocket session handles everything:
 
-1. **Camera frames** — JPEG snapshots sent to Gemini every 1.5 seconds
-2. **Mic audio** — PCM16 at 16kHz, streamed from the browser in real time
-3. **Gemini Live** — sees the frames, hears the question, responds in voice
-4. **Audio playback** — PCM16 at 24kHz, played back through the browser
-5. **Turn management** — mic mutes while Gemini speaks, reopens on `turn_complete`
-
-No manual button presses. No waiting for a full response before you can speak again. The session stays open until you close it.
+1. **Camera** — JPEG frames to Gemini every 1.5s (physical world)
+2. **Screen share** — opt-in desktop screen capture for notes, code, apps (user must approve)
+3. **Mic audio** — PCM16 at 16kHz, streamed in real time
+4. **Gemini Live** — sees frames, hears you, responds in voice, calls tools on demand
+5. **Memory** — Firestore vector search; save and recall facts across sessions
+6. **Drawing canvas** — labeled SVG diagrams when you ask it to visualize a concept
+7. **Turn management** — mic mutes while the agent speaks, reopens on `turn_complete`
 
 ---
 
 ## Architecture
 
-![SightLine Architecture](./architecture.svg)
+```mermaid
+flowchart TB
+  subgraph client [Nux client — browser]
+    direction TB
+    App[Next.js app]
+    Landing[Landing page]
+    Session[Live session UI]
+    Drawers[Trust & How-to drawers]
+    Diagram[Diagram canvas]
+    Hooks[Camera · mic · screen · WebSocket hooks]
+    App --> Landing
+    App --> Session
+    App --> Drawers
+    Session --> Diagram
+    Session --> Hooks
+  end
 
-The browser streams camera and mic data over WebSocket to a FastAPI backend. The backend forwards both to Gemini Live on Vertex AI using the Google GenAI SDK. Gemini's audio response streams back through the same WebSocket for immediate playback. A ping/pong keepalive task on both ends prevents proxy timeouts during long sessions.
+  subgraph cloud [Google Cloud — europe-west1]
+    direction TB
+    FE["Cloud Run · nux-frontend<br/>(deploy name may still be sightline-frontend)"]
+    BE["Cloud Run · nux-backend<br/>(deploy name may still be sightline-backend)"]
+    WS[WebSocket handler]
+    MemAPI[Memory REST API]
+    Gemini[GeminiSession service]
+    BE --> WS
+    BE --> MemAPI
+    WS --> Gemini
+  end
+
+  subgraph vertex [Vertex AI]
+    Live[Gemini Live · native audio]
+    Embed[gemini-embedding-001]
+  end
+
+  subgraph data [Firestore]
+    Mem[(Text memories + vectors)]
+  end
+
+  App --> FE
+  Hooks <-->|audio · video frames · ping/pong| WS
+  Drawers <-->|list / delete memories| MemAPI
+  Gemini <-->|persistent live session| Live
+  Gemini --> Embed
+  Gemini --> Mem
+  MemAPI --> Mem
+
+  Gemini -.->|tool: remember_this| Mem
+  Gemini -.->|tool: recall_memories| Mem
+  Gemini -.->|tool: request_screen_share| Session
+  Gemini -.->|tool: draw_diagram| Diagram
+  Live -->|audio + tool calls| Gemini
+```
+
+**How it fits together**
+
+| Layer | Role |
+|-------|------|
+| **Nux frontend** | Marketing landing (`Landing`, portrait) and live session (`page.tsx`). Trust & How-to open as Vaul drawers; memories load over REST. |
+| **WebSocket** | One long-lived connection per user — mic audio, camera/screen JPEG frames, Gemini audio back, tool side-effects (`turn_complete`, diagram JSON, share prompt). |
+| **Gemini Live** | Sees frames, hears speech, speaks responses, invokes tools. Session loop keeps `receive()` alive across turns. |
+| **Firestore** | Stores distilled text memories with embeddings only — never raw video or audio. |
+| **Cloud Run** | Hosts frontend (port 3000) and backend (port 8080) in `europe-west1`. Ping/pong every ~20s avoids proxy idle timeouts. |
+
+The GCP **project id** may still be `sightline-2026` and Cloud Run **service names** may still say `sightline-*` until you redeploy with Nux names or map a custom domain — see [Renaming Sightline → Nux](#renaming-sightline--nux).
 
 ---
 
@@ -64,7 +124,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000 --ws websockets-sansio
 ```
 
 **Frontend** (second terminal):
@@ -79,9 +139,70 @@ Create `frontend/.env.local`:
 
 ```bash
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-Open http://localhost:3000, click **START**, grant camera and mic access.
+Open http://localhost:3000, click **Talk with Nux**, grant camera and microphone access.
+
+If the button stays on **Connecting…**, the backend is not reachable at `NEXT_PUBLIC_WS_URL`. Start the backend first, then refresh the frontend.
+
+---
+
+## Favicon / branding
+
+Nux ships its own favicon (not the default Vercel/Next icon):
+
+- `frontend/app/icon.svg` — browser tab icon  
+- `frontend/app/apple-icon.png` — Apple touch icon  
+- `frontend/app/favicon.ico` — legacy fallback  
+
+**About copying Naya’s favicon:** [sterling.ng/naya](https://sterling.ng/naya/#homesect) uses **Sterling Bank’s corporate favicon**, not a Naya-specific mark. Prefer Nux’s own icon above rather than reusing Sterling’s trademark.
+
+To swap icons later, replace those three files and hard-refresh the browser (favicon caches aggressively).
+
+---
+
+## Renaming Sightline → Nux
+
+Product name in the UI is already **Nux**. Hosted URLs still say `sightline` because Cloud Run **service names** and the GCP **project id** were created that way. Renaming is a deploy/config change, not a frontend CSS change.
+
+### Option A — New Cloud Run services named `nux-*` (recommended)
+
+```bash
+# Backend
+gcloud run deploy nux-backend \
+  --image=europe-west1-docker.pkg.dev/sightline-2026/cloud-run-source-deploy/sightline-backend:latest \
+  --region=europe-west1 \
+  --allow-unauthenticated \
+  --port=8080
+
+# Note the new backend URL, then build frontend with:
+# NEXT_PUBLIC_WS_URL=wss://nux-backend-XXXX.europe-west1.run.app/ws
+
+gcloud run deploy nux-frontend \
+  --image=europe-west1-docker.pkg.dev/sightline-2026/cloud-run-source-deploy/sightline-frontend:latest \
+  --region=europe-west1 \
+  --allow-unauthenticated \
+  --port=3000
+```
+
+Then update:
+
+1. `cloudbuild.yaml` — service names + `NEXT_PUBLIC_WS_URL`  
+2. `frontend/hooks/useWebSocket.ts` — fallback WS URL  
+3. `frontend/lib/config.ts` — fallback API URL  
+4. This README’s Live Demo links  
+
+Old `sightline-frontend` / `sightline-backend` services can be deleted after traffic moves.
+
+### Option B — Custom domain (`nux.yourdomain.com`)
+
+Map a domain to the existing (or new) Cloud Run services in GCP Console → Cloud Run → **Manage custom domains**. The public URL becomes Nux-branded even if the internal service name stays `sightline-*`.
+
+### What you usually do *not* rename
+
+- GCP project id `sightline-2026` (immutable; creating a new project is a full migration)  
+- Local folder / GitHub repo name (optional cosmetic rename only)
 
 ---
 
@@ -107,11 +228,12 @@ self.client = genai.Client(
 
 ## Stack
 
-- **Frontend**: Next.js 14, TypeScript, WebRTC
+- **Frontend**: Next.js, TypeScript, WebRTC, `getDisplayMedia`
 - **Backend**: FastAPI, Python 3.11, asyncio
-- **AI**: Gemini Live (`gemini-2.0-flash-live-001`) via Vertex AI
+- **AI**: Gemini Live (`gemini-live-2.5-flash-native-audio`) via Vertex AI
+- **Memory**: Firestore native + vector search, `gemini-embedding-001`
 - **Auth**: Application Default Credentials (no exposed keys)
-- **Transport**: WebSocket — JSON + base64 encoded audio
+- **Transport**: WebSocket — JSON + base64 encoded audio/frames
 - **Hosting**: Google Cloud Run, region `europe-west1`
 
 ---
@@ -119,30 +241,44 @@ self.client = genai.Client(
 ## Project structure
 
 ```
-sightline/
+sightline/                         # repo folder (product brand: Nux)
 ├── backend/
 │   └── app/
-│       ├── main.py               — FastAPI entry point
-│       ├── api/websocket.py      — WebSocket handler + keepalive
-│       ├── core/config.py        — GCP project + model config
-│       └── services/gemini_service.py  — Gemini Live session + turn management
+│       ├── main.py                    — FastAPI entry point
+│       ├── api/websocket.py           — WebSocket handler + keepalive
+│       ├── api/memory.py              — Memory list/delete REST API
+│       ├── core/config.py             — GCP project + model config
+│       ├── services/gemini_service.py — Live session, tools, turn loop
+│       └── services/memory_service.py — Firestore vector memory
 └── frontend/
-    ├── app/page.tsx              — Main UI + session logic
+    ├── app/
+    │   ├── page.tsx                   — Landing + session UI
+    │   ├── layout.tsx                 — Metadata + fonts
+    │   ├── icon.svg / favicon.ico     — Nux favicon
+    │   └── apple-icon.png
     ├── components/
+    │   ├── Landing.tsx                — Marketing landing
+    │   ├── NuxPortrait.tsx            — Hero portrait
     │   ├── CameraView.tsx
+    │   ├── DiagramCanvas.tsx
+    │   ├── TrustPanel.tsx
+    │   ├── HowToPanel.tsx
+    │   ├── PanelCard.tsx
     │   ├── AudioVisualizer.tsx
     │   └── VoiceOverlay.tsx
     └── hooks/
-        ├── useCamera.ts          — Camera + mic stream management
-        ├── useWebSocket.ts       — WebSocket client + ping/pong keepalive
-        └── useAudioPlayer.ts     — PCM audio queue + mic mute logic
+        ├── useCamera.ts
+        ├── useScreenShare.ts
+        ├── useWebSocket.ts
+        ├── useMemories.ts
+        └── useAudioPlayer.ts
 ```
 
 ---
 
 ## What I learned building this
 
-Four problems that weren't in any tutorial.
+Five problems that weren't in any tutorial.
 
 **Gemini hears itself if you don't mute the mic during playback.** When Gemini speaks, its audio comes out of the browser speaker. The mic picks that up, sends it back to Gemini, and the session breaks — Gemini hears its own voice mid-sentence and goes silent permanently. The fix was `isSpeakingRef` in `useAudioPlayer.ts` — a React ref, not state, because refs hold the live value synchronously. The `ScriptProcessorNode` checks `isSpeakingRef.current` on every audio frame; if Gemini is speaking, the frame is dropped before it ever reaches the WebSocket. When the backend detects `turn_complete` in Gemini's response stream, it sends that signal to the frontend, which sets `isSpeakingRef.current = false` and reopens the mic. The reason it has to be a ref and not state is that the audio processor callback captures a stale closure — state updates wouldn't be visible inside it, but a ref always is.
 
@@ -150,13 +286,6 @@ Four problems that weren't in any tutorial.
 
 **The SDK's `receive()` stops listening after every turn — and tool calls exposed it.** When I added memory tools, Gemini went completely mute after saving or recalling a memory. No spoken confirmation, ever. The logs showed `memory_saved` immediately followed by `turn_complete` with zero audio in between. This one was sneaky: my first fix (adding `scheduling=INTERRUPT` to the tool response) was necessary but didn't solve it, and I only found the real cause by pulling raw Cloud Run logs and reading the installed SDK's source directly. It turns out `session.receive()` in the google-genai SDK is a one-turn generator — it breaks itself the moment `turn_complete` arrives. My code called it once per session instead of looping, so the backend stopped listening and tore down the whole connection after every single turn. Normal turns looked fine because their audio streamed before `turn_complete` fired, which hid the bug. But a tool call generates its spoken confirmation as a *new* turn — by the time Gemini tried to speak, nobody was listening. Worse, this meant the session had been silently destroyed and rebuilt on every exchange the whole time: Gemini was losing all conversation context each turn and paying full session-setup cost, and the app still "worked" enough that nobody noticed. The fix was one loop — wrapping `session.receive()` in `while True:` inside `GeminiSession.receive()`, so after each turn completes the backend immediately re-enters the generator on the same session instead of letting it die.
 
+**The live demo can look dead when the app is fine — Cloud Run just won't serve without billing.** From late July through 26 August 2026 the app URL returned Google's generic *Server Error / try again in 30 seconds*, then *Rate exceeded.* Both pages are misleading. `gcloud run services describe` still showed the service **Ready** (last healthy deploy 3 July). The real log line was *The request failed because billing is disabled for this project.* Project `sightline-2026` had `billingEnabled: false`; the linked account (*My Billing Account*) and every other billing account on the login were **closed**. After reopening billing, Cloud Run started a healthy Next.js instance (`Ready in 19.1s`, TCP probe on port 3000 passed, `min-instances=1` provisioned) but the URL kept returning HTTP 429. That second phase is a documented Google known issue: after you re-enable billing, Cloud Run can take **up to 30 minutes** to route traffic again, failing with 429/503 and the log *The request was aborted because there was no available instance* — and there is no manual workaround except waiting. Refreshing during that window makes the 429 last longer. The app code was never the failure.
+
 **Tested on a real user, not a simulator.** Pointed the running app at a family member's phone over a video call. Gemini correctly identified medications in their hand from the camera feed. It also correctly declined to give specific dosage advice — which was the right call, but it meant the app needed better prompting to guide users toward asking safe questions. That feedback came from actual use, not from me testing it on my desk.
-
----
-
-## Hackathon
-
-- **Challenge:** Gemini Live Agent Challenge 2026
-- **Category:** Live Agent (Real-time Audio/Vision)
-- **Devpost:** [SightLine submission](https://devpost.com/rkchellah)
-- **GDG Profile:** https://gdg.community.dev/u/mzntqb/#/about

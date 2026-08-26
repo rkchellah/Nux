@@ -1,44 +1,48 @@
 'use client'
+
 import { RefObject } from 'react'
 
 interface CameraViewProps {
-  videoRef: RefObject<HTMLVideoElement>
-  // 'cover' for camera feeds, 'contain' for screen shares so nothing is cropped
+  videoRef: RefObject<HTMLVideoElement | null>
   fit?: 'cover' | 'contain'
+  mirrored?: boolean
+  isActive?: boolean
+  error?: string | null
 }
 
-export function CameraView({ videoRef, fit = 'cover' }: CameraViewProps) {
+export function CameraView({
+  videoRef,
+  fit = 'cover',
+  mirrored = false,
+  isActive = false,
+  error = null,
+}: CameraViewProps) {
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 0, background: '#000' }}>
+    <div className="nux-camera">
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
-        onLoadedMetadata={(e) => {
+        className={`nux-camera-video nux-camera-video--${fit}${mirrored ? ' nux-camera-video--mirror' : ''}`}
+        onLoadedMetadata={e => {
           const v = e.currentTarget
-          if (v.paused) v.play().catch(() => { })
-        }}
-        style={{
-          position: 'absolute', top: 0, left: 0,
-          width: '100%', height: '100%',
-          objectFit: fit, zIndex: 1,
+          if (v.paused) void v.play().catch(() => {})
         }}
       />
-      <div style={{
-        position: 'absolute', inset: 0, zIndex: 2,
-        pointerEvents: 'none',
-        background: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.03) 3px, rgba(0,0,0,0.03) 4px)',
-      }} />
-      <div style={{
-        position: 'absolute', top: 16, right: 16, zIndex: 10,
-        display: 'flex', alignItems: 'center', gap: 8,
-        background: 'rgba(0,0,0,0.6)', padding: '4px 12px',
-        borderRadius: 999, border: '1px solid rgba(239,68,68,0.4)'
-      }}>
-        <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444' }} />
-        <span style={{ color: '#fff', fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.15em' }}>LIVE</span>
-      </div>
+      {!isActive && !error ? (
+        <div className="nux-camera-placeholder">
+          <div className="nux-camera-placeholder-ring" aria-hidden="true" />
+          <p>Starting camera…</p>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="nux-camera-placeholder nux-camera-placeholder--error">
+          <p>{error}</p>
+        </div>
+      ) : null}
+      <div className="nux-camera-scanlines" aria-hidden="true" />
+      <div className="nux-camera-vignette" aria-hidden="true" />
     </div>
   )
 }

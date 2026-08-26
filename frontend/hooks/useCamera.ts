@@ -8,16 +8,21 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
   const processorRef = useRef<ScriptProcessorNode | null>(null)
   const [isActive, setIsActive] = useState(false)
   const [isListening, setIsListening] = useState(false)
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment')
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
+  const [error, setError] = useState<string | null>(null)
+
+  const attachStream = useCallback((stream: MediaStream) => {
+    const video = videoRef.current
+    if (!video) return
+    video.srcObject = stream
+    video.muted = true
+    void video.play().catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!isActive || !streamRef.current) return
-    const video = videoRef.current
-    if (!video) return
-    video.srcObject = streamRef.current
-    video.muted = true
-    video.play().catch(() => { })
-  }, [isActive])
+    attachStream(streamRef.current)
+  }, [isActive, attachStream])
 
   const startAudioCapture = useCallback((stream: MediaStream) => {
     if (!onAudioChunk) return
@@ -50,20 +55,38 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
 
   const startCamera = useCallback(async (mode?: 'user' | 'environment') => {
     const selectedMode = mode || facingMode
+    setError(null)
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+      if (videoRef.current) videoRef.current.srcObject = null
+      setIsActive(false)
+      setIsListening(false)
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: selectedMode },
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: { ideal: selectedMode },
+        },
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
       })
       streamRef.current = stream
       setIsActive(true)
       setIsListening(true)
+      attachStream(stream)
       startAudioCapture(stream)
     } catch (err) {
       console.error('Camera error:', err)
+      const message =
+        err instanceof DOMException && err.name === 'NotAllowedError'
+          ? 'Camera access was denied. Allow camera in your browser settings.'
+          : 'Could not start camera. Check permissions and try again.'
+      setError(message)
       throw err
     }
-  }, [facingMode, startAudioCapture])
+  }, [facingMode, startAudioCapture, attachStream])
 
   const stopCamera = useCallback(() => {
     processorRef.current?.disconnect()
@@ -75,6 +98,7 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
     if (videoRef.current) videoRef.current.srcObject = null
     setIsActive(false)
     setIsListening(false)
+    setError(null)
   }, [])
 
   const toggleCamera = useCallback(async () => {
@@ -82,12 +106,10 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
     setFacingMode(newMode)
     if (isActive) {
       stopCamera()
-      setTimeout(() => startCamera(newMode), 300)
+      setTimeout(() => { void startCamera(newMode) }, 200)
     }
   }, [facingMode, isActive, stopCamera, startCamera])
 
-  // maxWidth: 640 is enough for camera scenes; screen shares pass 1280
-  // so on-screen text stays legible for Gemini.
   const captureFrame = useCallback((maxWidth: number = 640): string | null => {
     const video = videoRef.current
     if (!video || !isActive || video.readyState < 2) return null
@@ -105,5 +127,16 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
 
   const getAudioStream = useCallback(() => streamRef.current, [])
 
-  return { videoRef, isActive, isListening, facingMode, startCamera, stopCamera, toggleCamera, captureFrame, getAudioStream }
+  return {
+    videoRef,
+    isActive,
+    isListening,
+    facingMode,
+    error,
+    startCamera,
+    stopCamera,
+    toggleCamera,
+    captureFrame,
+    getAudioStream,
+  }
 }

@@ -67,5 +67,40 @@ class MemoryService:
         results = await vector_query.get()
         return [doc.to_dict()["text"] for doc in results]
 
+    async def list_memories(self, user_id: str) -> list[dict]:
+        """Return all memories for a user, newest first."""
+        query = self._collection(user_id).order_by(
+            "created_at", direction=firestore.Query.DESCENDING
+        )
+        results = await query.get()
+        items = []
+        for doc in results:
+            data = doc.to_dict()
+            created = data.get("created_at")
+            items.append({
+                "id": doc.id,
+                "text": data.get("text", ""),
+                "created_at": created.isoformat() if created else None,
+            })
+        return items
+
+    async def delete_memory(self, user_id: str, memory_id: str) -> bool:
+        """Delete a single memory. Returns True if it existed."""
+        doc_ref = self._collection(user_id).document(memory_id)
+        snap = await doc_ref.get()
+        if not snap.exists:
+            return False
+        await doc_ref.delete()
+        return True
+
+    async def delete_all_memories(self, user_id: str) -> int:
+        """Delete all memories for a user. Returns count deleted."""
+        results = await self._collection(user_id).get()
+        count = 0
+        for doc in results:
+            await doc.reference.delete()
+            count += 1
+        return count
+
 
 memory_service = MemoryService()

@@ -1,5 +1,7 @@
 'use client'
+
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { getUserId } from '@/lib/config'
 
 type WSStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
@@ -8,20 +10,11 @@ export type WSMessage = {
   data: string
 }
 
-const WS_URL = 'wss://sightline-backend-59597652459.europe-west1.run.app/ws'
-const USER_ID_KEY = 'sightline_user_id'
+const WS_URL =
+  process.env.NEXT_PUBLIC_WS_URL ??
+  'wss://sightline-backend-59597652459.europe-west1.run.app/ws'
 
-function getOrCreateUserId(): string {
-  if (typeof window === 'undefined') return 'anonymous'
-  let id = window.localStorage.getItem(USER_ID_KEY)
-  if (!id) {
-    id = crypto.randomUUID()
-    window.localStorage.setItem(USER_ID_KEY, id)
-  }
-  return id
-}
-
-export function useWebSocket() {
+export function useWebSocket(voiceName: string) {
   const [status, setStatus] = useState<WSStatus>('connecting')
   const [isConnected, setIsConnected] = useState(false)
   const [messages, setMessages] = useState<WSMessage[]>([])
@@ -29,6 +22,8 @@ export function useWebSocket() {
   const reconnectRef = useRef<NodeJS.Timeout | null>(null)
   const attemptsRef = useRef(0)
   const unmountedRef = useRef(false)
+  const voiceRef = useRef(voiceName)
+  voiceRef.current = voiceName
 
   const connect = useCallback(() => {
     if (unmountedRef.current) return
@@ -41,14 +36,17 @@ export function useWebSocket() {
     setIsConnected(false)
 
     try {
-      const userId = getOrCreateUserId()
-      const ws = new WebSocket(`${WS_URL}?user_id=${encodeURIComponent(userId)}`)
+      const userId = getUserId()
+      const voice = encodeURIComponent(voiceRef.current)
+      const ws = new WebSocket(
+        `${WS_URL}?user_id=${encodeURIComponent(userId)}&voice=${voice}`,
+      )
       wsRef.current = ws
 
       ws.onopen = () => {
         if (unmountedRef.current) return
         console.log('✅ WebSocket connected')
-        setMessages([])  // clear stale messages from previous session
+        setMessages([])
         setStatus('connected')
         setIsConnected(true)
         attemptsRef.current = 0
@@ -70,26 +68,35 @@ export function useWebSocket() {
         setIsConnected(false)
         wsRef.current = null
 
-        // Reconnect with backoff (max 5 attempts)
-        if (attemptsRef.current < 5) {
-          const delay = Math.min(1000 * Math.pow(2, attemptsRef.current), 10000)
-          attemptsRef.current++
-          console.log(`Reconnecting in ${delay}ms (attempt ${attemptsRef.current})`)
-          clearTimeout(reconnectRef.current ?? undefined)
-          reconnectRef.current = setTimeout(connect, delay)
-        }
+        const delay = Math.min(1000 * Math.pow(2, attemptsRef.current), 10000)
+        attemptsRef.current++
+        console.log(`Reconnecting in ${delay}ms (attempt ${attemptsRef.current})`)
+        clearTimeout(reconnectRef.current ?? undefined)
+        reconnectRef.current = setTimeout(connect, delay)
       }
 
       ws.onerror = (event) => {
         console.error('WebSocket error:', event)
         if (!unmountedRef.current) setStatus('error')
       }
-
     } catch (err) {
       console.error('Failed to create WebSocket:', err)
       setStatus('error')
     }
   }, [])
+
+  const reconnect = useCallback(() => {
+    clearTimeout(reconnectRef.current ?? undefined)
+    attemptsRef.current = 0
+    if (wsRef.current) {
+      wsRef.current.onclose = null
+      wsRef.current.close()
+      wsRef.current = null
+    }
+    setIsConnected(false)
+    setStatus('connecting')
+    connect()
+  }, [connect])
 
   useEffect(() => {
     unmountedRef.current = false
@@ -100,6 +107,16 @@ export function useWebSocket() {
       wsRef.current?.close()
     }
   }, [connect])
+
+  const isFirstVoiceEffect = useRef(true)
+
+  useEffect(() => {
+    if (isFirstVoiceEffect.current) {
+      isFirstVoiceEffect.current = false
+      return
+    }
+    reconnect()
+  }, [voiceName, reconnect])
 
   const sendMessage = useCallback((msg: WSMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -121,5 +138,5 @@ export function useWebSocket() {
     sendMessage({ type: 'text', data: text })
   }, [sendMessage])
 
-  return { status, isConnected, messages, sendAudio, sendFrame, sendText }
+  return { status, isConnected, messages, sendAudio, sendFrame, sendText, reconnect }
 }

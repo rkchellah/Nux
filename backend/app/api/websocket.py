@@ -6,15 +6,30 @@ import asyncio
 
 router = APIRouter()
 
+ALLOWED_VOICES = {
+    "Zephyr", "Puck", "Kore", "Charon", "Aoede", "Leda", "Fenrir", "Orus",
+    "Achernar", "Sulafat", "Algieba", "Vindemiatrix", "Enceladus", "Iapetus",
+    "Umbriel", "Algenib", "Erinome", "Rasalgethi", "Alnilam", "Schedar",
+    "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Sadachbia",
+    "Sadaltager", "Autonoe", "Callirrhoe", "Despina", "Laomedeia",
+}
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     user_id = websocket.query_params.get("user_id", "anonymous")
-    print(f"✅ Client connected (user_id={user_id})", flush=True)
+    voice_name = websocket.query_params.get("voice", "Zephyr")
+    if voice_name not in ALLOWED_VOICES:
+        voice_name = "Zephyr"
+    print(
+        f"✅ Client connected (user_id={user_id}, voice={voice_name})",
+        flush=True,
+    )
 
     try:
         service = GeminiLiveService()
-        async with service.connect(user_id=user_id) as session:
+        async with service.connect(user_id=user_id, voice_name=voice_name) as session:
             await websocket.send_text(json.dumps({
                 "type": "status",
                 "data": "connected"

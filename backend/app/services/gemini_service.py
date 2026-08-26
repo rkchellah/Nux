@@ -5,11 +5,13 @@ from app.services.memory_service import memory_service
 from contextlib import asynccontextmanager
 import asyncio
 import base64
+import json
 
-SYSTEM_PROMPT = """You are a warm, helpful AI companion that can see
-and hear the user in real time. Your view may be their camera (the
-physical world) or their shared screen (documents, notes, apps,
-webpages) — you can tell from what the frames look like.
+SYSTEM_PROMPT = """You are Nux — a warm, helpful AI agent that works
+alongside the user in real time. You can see and hear them through their
+camera and microphone. Your view may be their camera (the physical world)
+or their shared screen (documents, notes, apps, webpages) — you can tell
+from what the frames look like.
 
 When viewing a shared screen: read on-screen text accurately, explain
 what is shown, and guide the user step by step when they ask what to
@@ -43,6 +45,16 @@ You have two memory tools:
   automatically at the start of a conversation or for routine scene
   descriptions — only when clearly relevant.
 
+You have a drawing tool:
+- Call draw_diagram when the user asks you to draw, sketch, diagram, or
+  visualize how something works (e.g. "draw how photosynthesis works",
+  "show me a diagram"). Pass a short title and compact SVG with labeled
+  shapes and arrows. Use viewBox="0 0 400 300", light colors on a dark
+  background (#4aff9e, #38bdf8, #fbbf24, #ffffff), and clear text labels.
+  Connect the diagram to whatever you just saw or discussed. After the
+  tool returns, keep explaining the diagram out loud while the user looks
+  at it.
+
 When describing what the camera sees: be clear, concise, and
 proactive about hazards.
 When answering questions: be direct and brief.
@@ -60,7 +72,7 @@ class GeminiLiveService:
         self.model = settings.model_name
 
     @asynccontextmanager
-    async def connect(self, user_id: str = "anonymous"):
+    async def connect(self, user_id: str = "anonymous", voice_name: str = "Zephyr"):
         # Events that tool handlers want forwarded to the browser client
         # (drained and yielded by GeminiSession.receive()).
         client_events: asyncio.Queue = asyncio.Queue()
@@ -103,10 +115,28 @@ class GeminiLiveService:
                 "tap it to approve. You cannot see the screen yet."
             )
 
+        async def draw_diagram(title: str, svg: str) -> str:
+            """Draw a labeled diagram on the user's canvas to explain a
+            concept visually while you continue speaking.
+
+            Args:
+                title: Short title for the diagram (e.g. "Photosynthesis").
+                svg: SVG markup with viewBox="0 0 400 300". Use simple
+                    shapes (rect, circle, line, path) and <text> labels.
+                    Light stroke/fill on dark background.
+            """
+            payload = json.dumps({"title": title, "svg": svg})
+            await client_events.put({"type": "draw_diagram", "data": payload})
+            print(f"🎨 diagram_drawn: {title}")
+            return (
+                "Diagram is now on the user's canvas. Explain it out loud."
+            )
+
         tool_handlers = {
             "remember_this": remember_this,
             "recall_memories": recall_memories,
             "request_screen_share": request_screen_share,
+            "draw_diagram": draw_diagram,
         }
 
         config = types.LiveConnectConfig(
@@ -118,11 +148,11 @@ class GeminiLiveService:
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name="Zephyr"
+                        voice_name=voice_name
                     )
                 )
             ),
-            tools=[remember_this, recall_memories, request_screen_share],
+            tools=[remember_this, recall_memories, request_screen_share, draw_diagram],
         )
         async with self.client.aio.live.connect(
             model=self.model, config=config

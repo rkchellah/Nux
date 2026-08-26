@@ -38,7 +38,7 @@ export function useScreenShare() {
         })
         return stream
       } catch {
-        // User dismissed the picker — not an error
+        // User dismissed the picker - not an error
         return null
       }
     },
