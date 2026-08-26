@@ -36,6 +36,8 @@ steps:
       - 'build'
       - '--build-arg'
       - 'NEXT_PUBLIC_WS_URL=wss://sightline-backend-59597652459.europe-west1.run.app/ws'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=https://sightline-backend-59597652459.europe-west1.run.app'
       - '-t'
       - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/sightline-frontend:latest'
       - '.'

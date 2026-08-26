@@ -14,8 +14,6 @@ Nux runs continuously in one live session. Point your camera, share your screen 
 **API docs:** https://sightline-backend-59597652459.europe-west1.run.app/docs  
 **Demo video:** [Watch on YouTube](https://www.youtube.com/watch?v=hW1gJ22O3Zs)
 
-> Cloud Run service names are still `sightline-*` until you rename/redeploy (see [Renaming Sightline → Nux](#renaming-sightline--nux) below). The product UI and docs brand is **Nux**.
-
 ---
 
 ## What it does
@@ -57,8 +55,8 @@ flowchart TB
 
   subgraph cloud [Google Cloud — europe-west1]
     direction TB
-    FE["Cloud Run · nux-frontend<br/>(deploy name may still be sightline-frontend)"]
-    BE["Cloud Run · nux-backend<br/>(deploy name may still be sightline-backend)"]
+    FE["Cloud Run · sightline-frontend"]
+    BE["Cloud Run · sightline-backend"]
     WS[WebSocket handler]
     MemAPI[Memory REST API]
     Gemini[GeminiSession service]
@@ -99,9 +97,9 @@ flowchart TB
 | **WebSocket** | One long-lived connection per user — mic audio, camera/screen JPEG frames, Gemini audio back, tool side-effects (`turn_complete`, diagram JSON, share prompt). |
 | **Gemini Live** | Sees frames, hears speech, speaks responses, invokes tools. Session loop keeps `receive()` alive across turns. |
 | **Firestore** | Stores distilled text memories with embeddings only — never raw video or audio. |
-| **Cloud Run** | Hosts frontend (port 3000) and backend (port 8080) in `europe-west1`. Ping/pong every ~20s avoids proxy idle timeouts. |
+| **Cloud Run** | `sightline-frontend` (port 3000) and `sightline-backend` (port 8080) in `europe-west1`, GCP project `sightline-2026`. Ping/pong every ~20s avoids proxy idle timeouts. |
 
-The GCP **project id** may still be `sightline-2026` and Cloud Run **service names** may still say `sightline-*` until you redeploy with Nux names or map a custom domain — see [Renaming Sightline → Nux](#renaming-sightline--nux).
+**Deployed today:** UI brand is **Nux**. Hosted on free Cloud Run URLs (`*.run.app`). GCP project `sightline-2026`, services `sightline-frontend` / `sightline-backend`. Custom domain is optional and not required.
 
 ---
 
@@ -148,61 +146,41 @@ If the button stays on **Connecting…**, the backend is not reachable at `NEXT_
 
 ---
 
-## Favicon / branding
+## Deploy (Cloud Run)
 
-Nux ships its own favicon (not the default Vercel/Next icon):
-
-- `frontend/app/icon.svg` — browser tab icon  
-- `frontend/app/apple-icon.png` — Apple touch icon  
-- `frontend/app/favicon.ico` — legacy fallback  
-
-**About copying Naya’s favicon:** [sterling.ng/naya](https://sterling.ng/naya/#homesect) uses **Sterling Bank’s corporate favicon**, not a Naya-specific mark. Prefer Nux’s own icon above rather than reusing Sterling’s trademark.
-
-To swap icons later, replace those three files and hard-refresh the browser (favicon caches aggressively).
-
----
-
-## Renaming Sightline → Nux
-
-Product name in the UI is already **Nux**. Hosted URLs still say `sightline` because Cloud Run **service names** and the GCP **project id** were created that way. Renaming is a deploy/config change, not a frontend CSS change.
-
-### Option A — New Cloud Run services named `nux-*` (recommended)
+From the repo root, build and deploy both services:
 
 ```bash
-# Backend
-gcloud run deploy nux-backend \
+gcloud builds submit --config=cloudbuild.yaml --project=sightline-2026
+```
+
+That builds Docker images, pushes to Artifact Registry, and deploys:
+
+| Service | Port | Image |
+|---------|------|--------|
+| `sightline-backend` | 8080 | `europe-west1-docker.pkg.dev/sightline-2026/cloud-run-source-deploy/sightline-backend:latest` |
+| `sightline-frontend` | 3000 | `europe-west1-docker.pkg.dev/sightline-2026/cloud-run-source-deploy/sightline-frontend:latest` |
+
+**Backend only** (manual):
+
+```bash
+cd backend
+docker build -t europe-west1-docker.pkg.dev/sightline-2026/cloud-run-source-deploy/sightline-backend:latest .
+docker push europe-west1-docker.pkg.dev/sightline-2026/cloud-run-source-deploy/sightline-backend:latest
+
+gcloud run deploy sightline-backend \
   --image=europe-west1-docker.pkg.dev/sightline-2026/cloud-run-source-deploy/sightline-backend:latest \
   --region=europe-west1 \
   --allow-unauthenticated \
-  --port=8080
-
-# Note the new backend URL, then build frontend with:
-# NEXT_PUBLIC_WS_URL=wss://nux-backend-XXXX.europe-west1.run.app/ws
-
-gcloud run deploy nux-frontend \
-  --image=europe-west1-docker.pkg.dev/sightline-2026/cloud-run-source-deploy/sightline-frontend:latest \
-  --region=europe-west1 \
-  --allow-unauthenticated \
-  --port=3000
+  --port=8080 \
+  --memory=512Mi \
+  --timeout=300 \
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=sightline-2026,GOOGLE_CLOUD_LOCATION=europe-west1
 ```
 
-Then update:
+After deploy, check: `curl https://sightline-backend-59597652459.europe-west1.run.app/health`
 
-1. `cloudbuild.yaml` — service names + `NEXT_PUBLIC_WS_URL`  
-2. `frontend/hooks/useWebSocket.ts` — fallback WS URL  
-3. `frontend/lib/config.ts` — fallback API URL  
-4. This README’s Live Demo links  
-
-Old `sightline-frontend` / `sightline-backend` services can be deleted after traffic moves.
-
-### Option B — Custom domain (`nux.yourdomain.com`)
-
-Map a domain to the existing (or new) Cloud Run services in GCP Console → Cloud Run → **Manage custom domains**. The public URL becomes Nux-branded even if the internal service name stays `sightline-*`.
-
-### What you usually do *not* rename
-
-- GCP project id `sightline-2026` (immutable; creating a new project is a full migration)  
-- Local folder / GitHub repo name (optional cosmetic rename only)
+The frontend build bakes in `NEXT_PUBLIC_WS_URL` and `NEXT_PUBLIC_API_URL` (see `cloudbuild.yaml`).
 
 ---
 
@@ -241,7 +219,7 @@ self.client = genai.Client(
 ## Project structure
 
 ```
-sightline/                         # repo folder (product brand: Nux)
+sightline/                         # repo folder; product UI is Nux
 ├── backend/
 │   └── app/
 │       ├── main.py                    — FastAPI entry point

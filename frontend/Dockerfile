@@ -4,9 +4,11 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 
-# Accept WS URL at build time so Next.js can bake it in
+# Accept public URLs at build time so Next.js can bake them in
 ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN npm run build
 
