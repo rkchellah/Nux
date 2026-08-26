@@ -122,7 +122,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000 --ws websockets-sansio
+python -m uvicorn app.main:app --reload --port 8000 --ws websockets
 ```
 
 **Frontend** (second terminal):
