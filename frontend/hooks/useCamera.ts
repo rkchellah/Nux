@@ -1,15 +1,25 @@
 'use client'
 import { useRef, useState, useEffect, useCallback } from 'react'
 
-export function useCamera(onAudioChunk?: (base64: string) => void) {
+function isCoarsePointer(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia('(pointer: coarse)').matches
+}
+
+/**
+ * Camera + mic MediaStream only. Live-session PCM capture lives in page.tsx
+ * so it can rebind on streamEpoch / flip.
+ */
+export function useCamera() {
   const videoRef = useRef<HTMLVideoElement>(null!)
   const streamRef = useRef<MediaStream | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const processorRef = useRef<ScriptProcessorNode | null>(null)
   const [isActive, setIsActive] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
   const [error, setError] = useState<string | null>(null)
+  /** Bumps whenever a new MediaStream is attached — page remounts mic capture. */
+  const [streamEpoch, setStreamEpoch] = useState(0)
+  const [canFlipCamera, setCanFlipCamera] = useState(false)
 
   const attachStream = useCallback((stream: MediaStream) => {
     const video = videoRef.current
@@ -24,34 +34,56 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
     attachStream(streamRef.current)
   }, [isActive, attachStream])
 
-  const startAudioCapture = useCallback((stream: MediaStream) => {
-    if (!onAudioChunk) return
+  const refreshCameraFlipSupport = useCallback(async () => {
     try {
-      const audioContext = new AudioContext({ sampleRate: 16000 })
-      audioContextRef.current = audioContext
-      const source = audioContext.createMediaStreamSource(stream)
-      const processor = audioContext.createScriptProcessor(4096, 1, 1)
-      processorRef.current = processor
-      processor.onaudioprocess = (e) => {
-        const inputData = e.inputBuffer.getChannelData(0)
-        const pcm16 = new Int16Array(inputData.length)
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]))
-          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff
-        }
-        const bytes = new Uint8Array(pcm16.buffer)
-        let binary = ''
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i])
-        }
-        onAudioChunk(btoa(binary))
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        setCanFlipCamera(false)
+        return
       }
-      source.connect(processor)
-      processor.connect(audioContext.destination)
-    } catch (err) {
-      console.error('Audio capture error:', err)
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const cams = devices.filter(d => d.kind === 'videoinput')
+      setCanFlipCamera(cams.length > 1)
+    } catch {
+      setCanFlipCamera(false)
     }
-  }, [onAudioChunk])
+  }, [])
+
+  useEffect(() => {
+    void refreshCameraFlipSupport()
+    const md = navigator.mediaDevices
+    if (!md?.addEventListener) return
+    const onChange = () => { void refreshCameraFlipSupport() }
+    md.addEventListener('devicechange', onChange)
+    return () => md.removeEventListener('devicechange', onChange)
+  }, [refreshCameraFlipSupport])
+
+  useEffect(() => {
+    if (isActive) void refreshCameraFlipSupport()
+  }, [isActive, streamEpoch, refreshCameraFlipSupport])
+
+  const openCameraStream = useCallback(async (mode: 'user' | 'environment') => {
+    const mobile = isCoarsePointer()
+    const videoBase = mobile
+      ? { width: { ideal: 640 }, height: { ideal: 480 } }
+      : { width: { ideal: 1280 }, height: { ideal: 720 } }
+    const audio = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    } as const
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { ...videoBase, facingMode: { exact: mode } },
+        audio,
+      })
+    } catch {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { ...videoBase, facingMode: { ideal: mode } },
+        audio,
+      })
+    }
+  }, [])
 
   const startCamera = useCallback(async (mode?: 'user' | 'environment') => {
     const selectedMode = mode || facingMode
@@ -64,19 +96,14 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
       setIsListening(false)
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: { ideal: selectedMode },
-        },
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
-      })
+      const stream = await openCameraStream(selectedMode)
       streamRef.current = stream
+      setFacingMode(selectedMode)
       setIsActive(true)
       setIsListening(true)
+      setStreamEpoch(n => n + 1)
       attachStream(stream)
-      startAudioCapture(stream)
+      void refreshCameraFlipSupport()
     } catch (err) {
       console.error('Camera error:', err)
       const message =
@@ -86,13 +113,9 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
       setError(message)
       throw err
     }
-  }, [facingMode, startAudioCapture, attachStream])
+  }, [facingMode, attachStream, openCameraStream, refreshCameraFlipSupport])
 
   const stopCamera = useCallback(() => {
-    processorRef.current?.disconnect()
-    processorRef.current = null
-    audioContextRef.current?.close()
-    audioContextRef.current = null
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     if (videoRef.current) videoRef.current.srcObject = null
@@ -103,11 +126,15 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
 
   const toggleCamera = useCallback(async () => {
     const newMode = facingMode === 'user' ? 'environment' : 'user'
-    setFacingMode(newMode)
-    if (isActive) {
-      stopCamera()
-      setTimeout(() => { void startCamera(newMode) }, 200)
+    if (!isActive) {
+      setFacingMode(newMode)
+      return
     }
+    stopCamera()
+    await new Promise<void>(resolve => {
+      window.setTimeout(resolve, 200)
+    })
+    await startCamera(newMode)
   }, [facingMode, isActive, stopCamera, startCamera])
 
   const captureFrame = useCallback((maxWidth: number = 640): string | null => {
@@ -122,7 +149,7 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    return canvas.toDataURL('image/jpeg', 0.6).split(',')[1]
+    return canvas.toDataURL('image/jpeg', 0.6).split(',')[1] ?? null
   }, [isActive])
 
   const getAudioStream = useCallback(() => streamRef.current, [])
@@ -133,6 +160,8 @@ export function useCamera(onAudioChunk?: (base64: string) => void) {
     isListening,
     facingMode,
     error,
+    streamEpoch,
+    canFlipCamera,
     startCamera,
     stopCamera,
     toggleCamera,

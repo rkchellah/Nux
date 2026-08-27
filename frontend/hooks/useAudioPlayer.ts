@@ -59,7 +59,11 @@ export function useAudioPlayer() {
       const buf = queue.current.shift()!
       const src = ctx.createBufferSource()
       src.buffer = buf
-      src.connect(ctx.destination)
+      // Slight boost — mobile speakers + AEC often duck Gemini playback.
+      const gain = ctx.createGain()
+      gain.gain.value = 1.35
+      src.connect(gain)
+      gain.connect(ctx.destination)
       activeSource.current = src
       src.onended = () => {
         activeSource.current = null

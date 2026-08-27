@@ -1487,11 +1487,7 @@
   }
 }
 
-/* Legacy controls — kept for share modal only */
-.nux-controls-dock {
-  display: none;
-}
-
+/* Bottom glow while listening / speaking (AudioVisualizer) */
 .nux-audio-glow {
   position: fixed;
   left: 0;

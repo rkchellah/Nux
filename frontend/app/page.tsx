@@ -14,6 +14,7 @@ import { TrustPanel } from '@/components/TrustPanel'
 import { HowToPanel } from '@/components/HowToPanel'
 import { Landing } from '@/components/Landing'
 import { getVoiceName, setVoiceName } from '@/lib/config'
+import { floatToPcm16At16k, pcm16ToBase64 } from '@/lib/pcm'
 
 function IconStop() {
   return (
@@ -44,9 +45,9 @@ function IconShare() {
 
 export default function Home() {
   const [voiceName, setVoiceNameState] = useState(getVoiceName)
-  const { videoRef, isActive, isListening, facingMode, error: cameraError, startCamera, stopCamera, toggleCamera, captureFrame, getAudioStream } = useCamera()
+  const { videoRef, isActive, isListening, facingMode, error: cameraError, streamEpoch, canFlipCamera, startCamera, stopCamera, toggleCamera, captureFrame, getAudioStream } = useCamera()
   const { isSharing, isSupported: canShareScreen, startScreenShare, stopScreenShare } = useScreenShare()
-  const { isConnected, sendAudio, sendFrame, messages } = useWebSocket(voiceName)
+  const { isConnected, sendAudio, sendFrame, messages, syncVoiceSession } = useWebSocket(voiceName)
   const { playAudio, unlockAudio, isSpeaking, isSpeakingRef } = useAudioPlayer()
 
   const [isSessionActive, setIsSessionActive] = useState(false)
@@ -58,7 +59,7 @@ export default function Home() {
   const [canvasDiagram, setCanvasDiagram] = useState<DiagramData | null>(null)
   const [trustPanelOpen, setTrustPanelOpen] = useState(false)
   const [howToPanelOpen, setHowToPanelOpen] = useState(false)
-  const [voiceNotice, setVoiceNotice] = useState(false)
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null)
 
   const frameIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -67,12 +68,19 @@ export default function Home() {
   const lastProcessedMsgRef = useRef(0)
   const playAudioRef = useRef(playAudio)
   playAudioRef.current = playAudio
+  const isSessionActiveRef = useRef(false)
+  isSessionActiveRef.current = isSessionActive
 
   const handleVoiceChange = (next: string) => {
     setVoiceName(next)
     setVoiceNameState(next)
-    setVoiceNotice(true)
-    window.setTimeout(() => setVoiceNotice(false), 2800)
+    if (isSessionActiveRef.current) {
+      setVoiceNotice('Voice saved — applies when you start the next session')
+    } else {
+      syncVoiceSession()
+      setVoiceNotice('Voice updated')
+    }
+    window.setTimeout(() => setVoiceNotice(null), 3200)
   }
 
   useEffect(() => {
@@ -122,42 +130,54 @@ export default function Home() {
   }, [isSessionActive, captureFrame, sendFrame, videoSource, canvasDiagram])
 
   useEffect(() => {
-    if (!isSessionActive) return
-    let isClosed = false
+    if (!isSessionActive || !isActive) return
     const audioStream = getAudioStream()
     if (!audioStream) return
-    const ctx = new AudioContext({ sampleRate: 16000 })
+
+    let isClosed = false
+    const ctx = new AudioContext()
     audioContextRef.current = ctx
     const source = ctx.createMediaStreamSource(audioStream)
     const processor = ctx.createScriptProcessor(2048, 1, 1)
     processorRef.current = processor
+    // Keep ScriptProcessor alive without monitoring mic into speakers
+    // (monitoring fights mobile AEC and ducks Gemini playback).
+    const silent = ctx.createGain()
+    silent.gain.value = 0
+
     processor.onaudioprocess = (e) => {
       if (isClosed) return
       if (isSpeakingRef.current) return
       const input = e.inputBuffer.getChannelData(0)
-      const pcm16 = new Int16Array(input.length)
-      for (let i = 0; i < input.length; i++) {
-        pcm16[i] = Math.max(-32768, Math.min(32767, input[i] * 32768))
-      }
-      const base64 = btoa(String.fromCharCode(...Array.from(new Uint8Array(pcm16.buffer))))
-      sendAudio(base64)
+      const pcm16 = floatToPcm16At16k(input, ctx.sampleRate)
+      sendAudio(pcm16ToBase64(pcm16))
 
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       silenceTimerRef.current = setTimeout(() => {
         if (!isSpeakingRef.current) setIsProcessing(true)
       }, 1200)
     }
+
     source.connect(processor)
-    processor.connect(ctx.destination)
+    processor.connect(silent)
+    silent.connect(ctx.destination)
+
     return () => {
       isClosed = true
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      try { processor.disconnect(); source.disconnect(); if (ctx.state !== 'closed') ctx.close() } catch { }
+      try {
+        processor.disconnect()
+        silent.disconnect()
+        source.disconnect()
+        if (ctx.state !== 'closed') void ctx.close()
+      } catch { /* ignore teardown races */ }
     }
-  }, [isSessionActive, getAudioStream, sendAudio, isSpeakingRef])
+  }, [isSessionActive, isActive, streamEpoch, getAudioStream, sendAudio, isSpeakingRef])
 
   const handleStart = async () => {
     await unlockAudio()
+    // Apply any voice chosen while idle before opening the live camera session.
+    syncVoiceSession()
     try {
       await startCamera()
     } catch {
@@ -205,6 +225,8 @@ export default function Home() {
     if (processorRef.current) processorRef.current.disconnect()
     if (audioContextRef.current?.state !== 'closed') audioContextRef.current?.close()
     stopCamera()
+    // Rebuild Live session if voice was changed mid-call (deferred apply).
+    syncVoiceSession()
   }
 
   useEffect(() => {
@@ -281,7 +303,7 @@ export default function Home() {
 
           {voiceNotice ? (
             <div className="nux-toast" role="status">
-              Voice updated — reconnecting session
+              {voiceNotice}
             </div>
           ) : null}
 
@@ -354,7 +376,7 @@ export default function Home() {
                 <IconStop />
                 <span className="nux-tool-tip">Stop</span>
               </button>
-              {!isSharing && (
+              {!isSharing && canFlipCamera && (
                 <button
                   type="button"
                   className="nux-tool"
@@ -367,17 +389,18 @@ export default function Home() {
                   </span>
                 </button>
               )}
-              {isSharing ? (
-                <button type="button" className="nux-tool nux-tool--share" onClick={handleStopShare} aria-label="Stop sharing">
-                  <IconShare />
-                  <span className="nux-tool-tip">Stop share</span>
-                </button>
-              ) : (
-                <button type="button" className="nux-tool nux-tool--share" onClick={() => void handleShareScreen()} aria-label="Share screen">
-                  <IconShare />
-                  <span className="nux-tool-tip">Share screen</span>
-                </button>
-              )}
+              {(canShareScreen || isSharing) &&
+                (isSharing ? (
+                  <button type="button" className="nux-tool nux-tool--share" onClick={handleStopShare} aria-label="Stop sharing">
+                    <IconShare />
+                    <span className="nux-tool-tip">Stop share</span>
+                  </button>
+                ) : (
+                  <button type="button" className="nux-tool nux-tool--share" onClick={() => void handleShareScreen()} aria-label="Share screen">
+                    <IconShare />
+                    <span className="nux-tool-tip">Share screen</span>
+                  </button>
+                ))}
             </div>
           </div>
         </main>
