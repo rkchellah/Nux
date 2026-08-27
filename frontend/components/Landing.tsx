@@ -71,17 +71,17 @@ export function Landing({ ready, voiceName, onVoiceChange, onStart, onHowTo, onT
           <p className="nux-lead">
             Hey there! I&apos;m Nux, your collaborative agent. Point your camera, share your screen when
             you choose, and speak naturally. I see what you show me, remember what you ask me to, and
-            draw when you need to go deeper. Let&apos;s work together - never instead of you.
+            draw when you need to go deeper. Let&apos;s work together — with you.
           </p>
           <div className="nux-cta-row">
             <button
               type="button"
-              className={`nux-btn nux-btn-primary${ready ? '' : ' is-connecting'}`}
+              className={`nux-btn nux-btn-primary nux-btn-talk${ready ? '' : ' is-connecting'}`}
               onClick={onStart}
               disabled={!ready}
             >
               {!ready ? <span className="nux-btn-spinner" aria-hidden="true" /> : null}
-              {ready ? 'Talk with Nux' : 'Connecting…'}
+              {ready ? 'Talk to Nux' : 'Connecting…'}
             </button>
             <button type="button" className="nux-btn nux-btn-secondary" onClick={() => setVoiceOpen(true)}>
               Voices
@@ -131,7 +131,7 @@ export function Landing({ ready, voiceName, onVoiceChange, onStart, onHowTo, onT
           <div>
             <dt>How do I start?</dt>
             <dd>
-              Tap Talk with Nux and allow camera and microphone access. Then point, speak, and go.
+              Tap Talk to Nux and allow camera and microphone access. Then point, speak, and go.
             </dd>
           </div>
           <div>
@@ -151,7 +151,7 @@ export function Landing({ ready, voiceName, onVoiceChange, onStart, onHowTo, onT
         </dl>
       </section>
 
-      <footer className="nux-footer">Works with you · never instead of you</footer>
+      <footer className="nux-footer">Works with you</footer>
     </div>
   )
 }

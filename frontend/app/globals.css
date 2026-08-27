@@ -296,6 +296,18 @@
   .nux-cta-row .nux-btn {
     width: 100%;
   }
+
+  .nux-cta-row .nux-btn-talk {
+    min-height: 3.75rem;
+    padding: 1.15rem 1.5rem;
+    font-size: 1.15rem;
+    border-radius: 16px;
+  }
+
+  .nux-cta-row .nux-btn-secondary {
+    min-height: 3rem;
+    font-size: 0.95rem;
+  }
 }
 
 .nux-btn {

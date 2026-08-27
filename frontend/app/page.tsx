@@ -176,6 +176,10 @@ export default function Home() {
   }, [getAudioStream, videoRef])
 
   const handleShareScreen = async () => {
+    if (!canShareScreen) {
+      window.alert('Screen share isn’t available in this browser. Try Chrome or Edge on desktop.')
+      return
+    }
     const stream = await startScreenShare(revertToCamera)
     if (!stream) return
     setShareRequested(false)
@@ -363,18 +367,17 @@ export default function Home() {
                   </span>
                 </button>
               )}
-              {canShareScreen &&
-                (isSharing ? (
-                  <button type="button" className="nux-tool nux-tool--share" onClick={handleStopShare} aria-label="Stop sharing">
-                    <IconShare />
-                    <span className="nux-tool-tip">Stop share</span>
-                  </button>
-                ) : (
-                  <button type="button" className="nux-tool nux-tool--share" onClick={() => void handleShareScreen()} aria-label="Share screen">
-                    <IconShare />
-                    <span className="nux-tool-tip">Share screen</span>
-                  </button>
-                ))}
+              {isSharing ? (
+                <button type="button" className="nux-tool nux-tool--share" onClick={handleStopShare} aria-label="Stop sharing">
+                  <IconShare />
+                  <span className="nux-tool-tip">Stop share</span>
+                </button>
+              ) : (
+                <button type="button" className="nux-tool nux-tool--share" onClick={() => void handleShareScreen()} aria-label="Share screen">
+                  <IconShare />
+                  <span className="nux-tool-tip">Share screen</span>
+                </button>
+              )}
             </div>
           </div>
         </main>
