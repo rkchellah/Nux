@@ -16,6 +16,22 @@ When Gemini speaks, its audio comes out of the browser speaker. The mic picks th
 
 ---
 
+## Gemini's voice sounds quiet even after the mobile "boost" gain
+
+**Symptom:** Gemini's speech plays but is noticeably quieter than expected, especially on phones — not muted, just faint.
+
+**Audit findings, ranked by contribution:**
+
+1. **Flat gain instead of loudness maximization.** The old fix (`useAudioPlayer.ts`) multiplied every chunk by a fixed `1.35` gain with nothing downstream to catch peaks. Because Web Audio hard-clips (distorts, doesn't limit) at the destination when a sample exceeds ±1.0, the multiplier could only be nudged up a little before introducing clipping distortion — so quiet passages stayed quiet. `gemini-live-2.5-flash-native-audio` masters its voices with headroom (well under 0 dBFS) by design, so a small linear boost isn't enough.
+2. **Mobile OS "communication mode" audio routing.** `useCamera.ts` keeps a `getUserMedia` audio track open (`echoCancellation`/`noiseSuppression`/`autoGainControl`) for the whole live session. Android and iOS both treat a page with an open mic capture as a voice-call use case and can route *all* page audio — including unrelated Web Audio API playback — through the quieter "communication"/earpiece channel instead of the normal loud media channel. This is an OS/browser-level behavior with no reliable JS override; it compounds with #1 rather than being fixable purely client-side.
+3. **Voice choice.** Some prebuilt voices (`lib/voices.ts` — "Soft", "Breathy", "Gentle" tones) are inherently quieter than others ("Firm", "Excitable") — not a bug, but worth ruling out when comparing loudness across sessions.
+
+**Fix (this pass):** Replaced the single `GainNode` in `useAudioPlayer.ts` with a persistent gain (`1.8`, created once per `AudioContext` instead of per chunk) feeding a `DynamicsCompressorNode` configured as a limiter (threshold `-12dB`, ratio `16:1`, fast attack) before `ctx.destination`. This boosts quiet passages harder while the limiter — not hard clipping — catches loud peaks, raising perceived loudness without new distortion.
+
+**Residual risk / next experiment:** If it's still too quiet on a specific phone, the OS communication-mode routing (#2) is the remaining suspect and isn't controllable from the web page; validate by comparing loudness with the mic permission-block removed (`isActive=false`) — if that session is noticeably louder, it confirms OS-level ducking rather than app logic.
+
+---
+
 ## WebSocket connections to Cloud Run die without a heartbeat
 
 Cloud Run sits behind a Google-managed proxy with a ~60-second idle timeout. A long conversation with natural pauses — the user thinking, Gemini processing — can easily go quiet for more than a minute. The connection drops with no error, just silence.

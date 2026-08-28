@@ -389,18 +389,17 @@ export default function Home() {
                   </span>
                 </button>
               )}
-              {(canShareScreen || isSharing) &&
-                (isSharing ? (
-                  <button type="button" className="nux-tool nux-tool--share" onClick={handleStopShare} aria-label="Stop sharing">
-                    <IconShare />
-                    <span className="nux-tool-tip">Stop share</span>
-                  </button>
-                ) : (
-                  <button type="button" className="nux-tool nux-tool--share" onClick={() => void handleShareScreen()} aria-label="Share screen">
-                    <IconShare />
-                    <span className="nux-tool-tip">Share screen</span>
-                  </button>
-                ))}
+              {isSharing ? (
+                <button type="button" className="nux-tool nux-tool--share" onClick={handleStopShare} aria-label="Stop sharing">
+                  <IconShare />
+                  <span className="nux-tool-tip">Stop share</span>
+                </button>
+              ) : (
+                <button type="button" className="nux-tool nux-tool--share" onClick={() => void handleShareScreen()} aria-label="Share screen">
+                  <IconShare />
+                  <span className="nux-tool-tip">Share screen</span>
+                </button>
+              )}
             </div>
           </div>
         </main>

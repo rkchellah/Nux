@@ -71,7 +71,7 @@ export function Landing({ ready, voiceName, onVoiceChange, onStart, onHowTo, onT
           <p className="nux-lead">
             Hey there! I&apos;m Nux, your collaborative agent. Point your camera, share your screen when
             you choose, and speak naturally. I see what you show me, remember what you ask me to, and
-            draw when you need to go deeper. Let&apos;s work together — with you.
+            draw when you need to go deeper. Let&apos;s work together.
           </p>
           <div className="nux-cta-row">
             <button

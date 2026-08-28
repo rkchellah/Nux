@@ -10,11 +10,34 @@ export function useAudioPlayer() {
   const unlocked = useRef(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const isSpeakingRef = useRef(false)
+  /**
+   * Persistent boost + limiter chain (created once per context, reused by
+   * every chunk). Gemini's native-audio voices are mastered quiet, and
+   * mobile speakers + the OS "communication mode" audio route (triggered by
+   * holding an open getUserMedia mic track) duck it further. A flat gain
+   * multiply alone risks hard-clipping at destination on loud passages, so
+   * we boost pre-limiter and let the compressor cap peaks instead of
+   * clipping them.
+   */
+  const outputChainRef = useRef<{ gain: GainNode; limiter: DynamicsCompressorNode } | null>(null)
 
   const getCtx = useCallback(() => {
     if (!ctxRef.current || ctxRef.current.state === 'closed') {
-      ctxRef.current = new AudioContext({ sampleRate: 24000 })
+      const ctx = new AudioContext({ sampleRate: 24000 })
+      ctxRef.current = ctx
       unlocked.current = false
+
+      const gain = ctx.createGain()
+      gain.gain.value = 1.8
+      const limiter = ctx.createDynamicsCompressor()
+      limiter.threshold.value = -12
+      limiter.knee.value = 6
+      limiter.ratio.value = 16
+      limiter.attack.value = 0.003
+      limiter.release.value = 0.15
+      gain.connect(limiter)
+      limiter.connect(ctx.destination)
+      outputChainRef.current = { gain, limiter }
     }
     return ctxRef.current
   }, [])
@@ -59,11 +82,7 @@ export function useAudioPlayer() {
       const buf = queue.current.shift()!
       const src = ctx.createBufferSource()
       src.buffer = buf
-      // Slight boost — mobile speakers + AEC often duck Gemini playback.
-      const gain = ctx.createGain()
-      gain.gain.value = 1.35
-      src.connect(gain)
-      gain.connect(ctx.destination)
+      src.connect(outputChainRef.current!.gain)
       activeSource.current = src
       src.onended = () => {
         activeSource.current = null

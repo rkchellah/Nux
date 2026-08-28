@@ -256,5 +256,5 @@ sightline/                         # repo folder; product UI is Nux
 
 ## What I learned building this
 
-See **[bug_log.md](./bug_log.md)** — microphone feedback loops, Cloud Run idle timeouts, Gemini Live `receive()` one-turn generators, billing outages that look like app failures, camera-flip mic death, and deploy flag mistakes.
+See **[BUG_LOG.md](./BUG_LOG.md)** — microphone feedback loops, Cloud Run idle timeouts, Gemini Live `receive()` one-turn generators, billing outages that look like app failures, camera-flip mic death, and deploy flag mistakes.
 
