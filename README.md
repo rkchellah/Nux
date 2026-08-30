@@ -175,8 +175,12 @@ gcloud run deploy sightline-backend \
   --port=8080 \
   --memory=512Mi \
   --timeout=300 \
+  --min-instances=1 \
+  --cpu-boost \
   --set-env-vars=GOOGLE_CLOUD_PROJECT=sightline-2026,GOOGLE_CLOUD_LOCATION=europe-west1
 ```
+
+`--min-instances=1` keeps one instance warm so a session never eats a Cloud Run cold start (container boot + Vertex client init) — without it, `gcloud run deploy` defaults to scale-to-zero, which shows up as several extra seconds of silence on the first message after any idle period.
 
 After deploy, check: `curl https://sightline-backend-59597652459.europe-west1.run.app/health`
 

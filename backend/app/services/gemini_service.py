@@ -62,13 +62,20 @@ Do not describe the mechanics of your memory tools (databases,
 lookups, saving) — just respond naturally, but always respond with
 speech after using a tool."""
 
+# Reused across every WebSocket connection on a warm instance instead of
+# rebuilt per session — genai.Client() resolves Application Default
+# Credentials and opens a gRPC channel, which otherwise adds avoidable
+# startup latency to every "Start" click and every voice-change reconnect.
+_vertex_client = genai.Client(
+    vertexai=True,
+    project=settings.google_cloud_project,
+    location=settings.google_cloud_location,
+)
+
+
 class GeminiLiveService:
     def __init__(self):
-        self.client = genai.Client(
-            vertexai=True,
-            project=settings.google_cloud_project,
-            location=settings.google_cloud_location
-        )
+        self.client = _vertex_client
         self.model = settings.model_name
 
     @asynccontextmanager

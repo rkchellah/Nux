@@ -20,8 +20,6 @@ export function useAudioPlayer() {
    * clipping them.
    */
   const outputChainRef = useRef<{ gain: GainNode; limiter: DynamicsCompressorNode } | null>(null)
-  /** Real <audio> element used to sidestep Android's mic-triggered volume ducking (see below). */
-  const audioElRef = useRef<HTMLAudioElement | null>(null)
 
   const getCtx = useCallback(() => {
     if (!ctxRef.current || ctxRef.current.state === 'closed') {
@@ -38,33 +36,14 @@ export function useAudioPlayer() {
       limiter.attack.value = 0.003
       limiter.release.value = 0.15
       gain.connect(limiter)
+      // Straight to hardware output. A MediaStreamDestination + <audio>
+      // element route was tried here to dodge Android's mic-triggered
+      // volume ducking, but that path buffers audio for playback-from-
+      // stream and measurably adds latency (confirmed regression — see
+      // BUG_LOG.md). For a live conversational agent, responsiveness beats
+      // a speculative loudness gain, so this stays a direct connection.
+      limiter.connect(ctx.destination)
       outputChainRef.current = { gain, limiter }
-
-      // Holding an open getUserMedia mic track pins Chrome's WebAudio output
-      // unit to Android's quiet STREAM_VOICE_CALL route alongside the mic
-      // (documented Chromium behavior, crbug 243506) — no gain node can undo
-      // an OS-level route change. Real <audio>/<video> elements aren't pinned
-      // to that route, so pipe the finished mix into one via a
-      // MediaStreamDestination instead of connecting straight to
-      // ctx.destination. Falls back to a direct connection if the element
-      // route is blocked or unsupported, so playback never goes silent.
-      try {
-        const streamDest = ctx.createMediaStreamDestination()
-        limiter.connect(streamDest)
-        if (!audioElRef.current) audioElRef.current = new Audio()
-        const audioEl = audioElRef.current
-        audioEl.autoplay = true
-        audioEl.srcObject = streamDest.stream
-        audioEl.play().catch(() => {
-          try {
-            limiter.disconnect(streamDest)
-          } catch { /* already disconnected */ }
-          limiter.connect(ctx.destination)
-        })
-      } catch (e) {
-        console.error('Audio element route unavailable, using direct connection:', e)
-        limiter.connect(ctx.destination)
-      }
     }
     return ctxRef.current
   }, [])

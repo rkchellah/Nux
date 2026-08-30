@@ -32,6 +32,20 @@ When Gemini speaks, its audio comes out of the browser speaker. The mic picks th
 
 **If still quiet after both fixes:** the remaining lever is native-only — forcing the Android `AudioManager` speakerphone route (e.g. via a Capacitor `AudioManager`/`AudioRouting` plugin) — which requires wrapping the app outside the plain web page and is out of scope unless the product goes native.
 
+**Reverted (2026-08-30):** The `<audio>`-element route above was a confirmed latency regression — routing through `createMediaStreamDestination()` into an `HTMLAudioElement` buffers audio for playback-from-stream, which is measurably slower than a direct `AudioNode` → `ctx.destination` connection (this is *the* documented trade-off of that API — see the next entry). For a live conversational agent, a snappy reply matters more than a speculative loudness workaround for an OS behavior we couldn't even confirm was happening. `useAudioPlayer.ts` now connects the gain/limiter chain straight to `ctx.destination` again. The gain (`1.8`) + limiter (threshold `-12dB`, ratio `16:1`) stays — that part is real signal processing in the render graph, not an extra buffering hop, so it costs no latency.
+
+---
+
+## Audit: "latency problems since the rebrand" (region was already fixed, latency persisted)
+
+Region wasn't it — `europe-west1` was already set for both Cloud Run services *and* is a supported region for `gemini-live-2.5-flash-native-audio` on Vertex AI (confirmed against Google's regional model-availability list). Went through everything that changed at/after the `fb38548 Rebranding to Nux` commit instead. Ranked by how much it actually explains the symptom:
+
+1. **Confirmed cause — the audio-element playback route from the loudness fix two commits later (`4e5590c`).** `createMediaStreamDestination()` → `<audio>` element is a well-documented latency trade-off of that API (MDN/W3C: it exists to *export* a stream, not for low-latency local playback; one Stack Overflow report measured 4+ seconds of buffering on that exact path). This was added *after* the rebrand while chasing the "voice too quiet" bug, and is the single most concrete, self-inflicted, and recent explanation for new perceived delay. Reverted above.
+2. **Ruled out — Cloud Run cold starts.** `gcloud run services describe` shows `minScale=1` and `startup-cpu-boost=true` already live on both `sightline-backend` and `sightline-frontend`. This isn't in `cloudbuild.yaml` though (must have been set by a manual `gcloud run deploy`/console edit outside the checked-in script) — codified it into `cloudbuild.yaml` and the README's manual deploy command so a future redeploy from the documented command can't silently drop it back to scale-to-zero.
+3. **Minor, pre-existing (not rebrand-specific) — `genai.Client()` was rebuilt on every single WebSocket connection.** Each "Start" click and every voice-change reconnect (`syncVoiceSession`) tore down and recreated a `GeminiLiveService()`, including a fresh `genai.Client()` — meaning fresh ADC credential resolution and gRPC channel setup every time instead of reusing one already warmed up on the instance. Moved the client to a module-level singleton in `gemini_service.py`, reused across connections on a warm instance.
+4. **Minor, new since rebrand — switching voice mid-idle now tears down and reopens the whole Gemini Live session** (`useWebSocket.ts` → `syncVoiceSession`/`reconnect`). Didn't exist pre-rebrand because there was no voice picker. Only affects the moment you change voice, not ongoing conversation latency — noted, not changed, since re-opening the Live session is the only way to apply `speech_config.voice_config` (Vertex doesn't support changing voice on a live session).
+5. **Checked, not a factor — camera resolution bump (640×480 → 1280×720 in the rebrand commit).** `captureFrame()` still downscales to `maxWidth` (640 for camera, 1280 for screen) before sending, so the JPEG payload size to Gemini is unchanged; only local video-element rendering got heavier, not the network path.
+
 ---
 
 ## WebSocket connections to Cloud Run die without a heartbeat
