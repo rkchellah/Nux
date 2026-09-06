@@ -14,6 +14,7 @@ import { TrustPanel } from '@/components/TrustPanel'
 import { HowToPanel } from '@/components/HowToPanel'
 import { Landing } from '@/components/Landing'
 import { getVoiceName, setVoiceName } from '@/lib/config'
+import { DEFAULT_VOICE } from '@/lib/voices'
 import { floatToPcm16At16k, pcm16ToBase64 } from '@/lib/pcm'
 
 function IconStop() {
@@ -44,7 +45,12 @@ function IconShare() {
 }
 
 export default function Home() {
-  const [voiceName, setVoiceNameState] = useState(getVoiceName)
+  // Server-render (and the client's first hydration pass) can't see
+  // localStorage, so this must start as the same default on both sides —
+  // reading getVoiceName() here directly caused a client/server text
+  // mismatch (React error #418) that retriggered every render and hung
+  // the tab, which is what made the app look permanently mute.
+  const [voiceName, setVoiceNameState] = useState(DEFAULT_VOICE)
   const { videoRef, isActive, isListening, facingMode, error: cameraError, streamEpoch, canFlipCamera, startCamera, stopCamera, toggleCamera, captureFrame, getAudioStream } = useCamera()
   const { isSharing, isSupported: canShareScreen, startScreenShare, stopScreenShare } = useScreenShare()
   const { isConnected, sendAudio, sendFrame, messages, syncVoiceSession } = useWebSocket(voiceName)
@@ -82,6 +88,15 @@ export default function Home() {
     }
     window.setTimeout(() => setVoiceNotice(null), 3200)
   }
+
+  // Pick up the real stored voice once we're safely past hydration.
+  // No need to force a reconnect here — handleStart() already calls
+  // syncVoiceSession() before every session, once the WS hook's voice
+  // ref has caught up to this state update.
+  useEffect(() => {
+    const stored = getVoiceName()
+    if (stored !== DEFAULT_VOICE) setVoiceNameState(stored)
+  }, [])
 
   useEffect(() => {
     if (messages.length === 0) {
