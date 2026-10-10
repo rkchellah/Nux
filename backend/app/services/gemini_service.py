@@ -159,6 +159,9 @@ class GeminiLiveService:
                     )
                 )
             ),
+            # Audio-only responses carry no text parts, so captions need the
+            # model's speech transcribed alongside it.
+            output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=[remember_this, recall_memories, request_screen_share, draw_diagram],
         )
         async with self.client.aio.live.connect(
@@ -239,6 +242,12 @@ class GeminiSession:
                     sc = response.server_content
                     if not sc:
                         continue
+
+                    # Caption chunks — a fragment of the current spoken turn,
+                    # stitched together by the frontend until turn_complete.
+                    transcript = getattr(sc, "output_transcription", None)
+                    if transcript and transcript.text:
+                        yield {"type": "transcript", "data": transcript.text}
 
                     # Turn finished — tell the frontend to resume mic input,
                     # then loop back into session.receive() for the next turn.

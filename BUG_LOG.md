@@ -2,6 +2,8 @@
 
 Problems that weren't in any tutorial. Kept here (not only in the README) so deploy docs stay short and the failure history stays searchable.
 
+> **Naming note:** Nux was called **Sightline** until the rebrand on 27 August 2026 (commit `fb38548`). Entries below that mention `sightline-2026`, `sightline-backend` or `sightline-frontend` are referring to the GCP project and Cloud Run services, which still carry their original names.
+
 ---
 
 ## Gemini hears itself if you don't mute the mic during playback
@@ -96,6 +98,34 @@ Tested on a real device, not a simulator. Camera pointed at medications in hand.
 
 ---
 
+## Nux goes mute after ~31 server messages
+
+**Symptom:** The first reply plays, then Nux stops talking (and stops drawing or asking to share) for the rest of the connection.
+
+**Cause:** `useWebSocket` caps its message list at 31 (`prev.slice(-30)`), but since the rebrand `page.tsx` tracked progress with an array-index cursor (`lastProcessedMsgRef = messages.length`). Once the list hits 31, its length never grows again, so `messages.length <= cursor` holds forever and every later message — audio chunks, `turn_complete`, `draw_diagram`, `screen_share_request` — is silently skipped. A single spoken reply is easily more than 31 audio chunks. Only a WebSocket reconnect (which empties the list) masked it.
+
+**Fix (2026-10):** each inbound message gets a monotonically increasing `seq` in `useWebSocket`; `page.tsx` processes anything with `seq` above the last one it handled, independent of the cap.
+
+---
+
+## Diagram canvas was unstyled and left the camera dead
+
+**Symptom:** `draw_diagram` "worked" on the backend, but the canvas rendered as raw unstyled HTML under the status bar — on desktop the full-width SVG overflowed the clipped live view, hiding the "Back to view" button. After closing a diagram the camera stayed black and Nux could no longer see anything.
+
+**Cause:** `DiagramCanvas` used `sl-canvas-*` classes that never existed in `globals.css` in any commit. Separately, `page.tsx` unmounted `CameraView` while a diagram was open; the remounted `<video>` had no `srcObject`, and `useCamera` only reattaches on an `isActive` change, so `captureFrame()` returned null for the rest of the session.
+
+**Fix (2026-10):** `nux-canvas-*` styles (fixed overlay between status bar and toolbar, SVG shrinks to fit, close button in the header so captions can't cover it). `CameraView` now stays mounted under the overlay. Sanitizer also strips `<foreignObject>`.
+
+---
+
+## Captions never appeared
+
+`VoiceOverlay` renders `text` messages, but the Live session uses `response_modalities=["AUDIO"]`, which returns no text parts — so the caption area was always empty.
+
+**Fix (2026-10):** `output_audio_transcription` enabled in `LiveConnectConfig`; the backend forwards `output_transcription` fragments as `transcript` messages, and `page.tsx` stitches them into one bubble per turn until `turn_complete`.
+
+---
+
 ## Deploy: invalid uvicorn `--ws` value
 
 Cloud Run revision failed to listen on `PORT=8080` because the container exited immediately:
@@ -114,7 +144,9 @@ Pinned uvicorn `0.30.0` does not support `websockets-sansio`.
 |------|--------|
 | Memory | Wired end-to-end (tools + Firestore + Trust UI). Needs vector index in GCP (`firestore.indexes.json`). |
 | Screen share | Wired on desktop; weak/unsupported on many phones. |
-| Drawing | Implemented via `draw_diagram` → SVG canvas — not freehand. |
+| Drawing | Implemented via `draw_diagram` → SVG canvas overlay — not freehand. Frames to Gemini pause while a diagram is open. |
+| Captions | Gemini's speech transcription, one bubble per turn. |
+| Memory API auth | None — `/memories` trusts the `user_id` query param (a random UUID per browser). Fine for a demo; needs real auth before handling sensitive data. |
 | Voices | Applied in Live `speech_config`; changing voice mid-session is deferred until the next session (no cold reconnect mid-call). |
 | Leftover dual mic path | Removed — `useCamera` no longer owns ScriptProcessor; only `page.tsx` captures PCM. |
 | Dead `StatusIndicator` | Removed — unused after live toolbar rewrite. |

@@ -71,7 +71,8 @@ export default function Home() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const lastProcessedMsgRef = useRef(0)
+  const lastProcessedSeqRef = useRef(0)
+  const captionOpenRef = useRef(false)
   const playAudioRef = useRef(playAudio)
   playAudioRef.current = playAudio
   const isSessionActiveRef = useRef(false)
@@ -99,20 +100,28 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (messages.length === 0) {
-      lastProcessedMsgRef.current = 0
-      return
-    }
-    if (messages.length <= lastProcessedMsgRef.current) return
-
-    for (let i = lastProcessedMsgRef.current; i < messages.length; i++) {
-      const msg = messages[i]
+    for (const msg of messages) {
+      if (msg.seq <= lastProcessedSeqRef.current) continue
+      lastProcessedSeqRef.current = msg.seq
       if (msg.type === 'audio') {
         setIsProcessing(false)
         void playAudioRef.current(msg.data)
       }
-      if (msg.type === 'text') setDisplayMessages(prev => [...prev, msg.data])
-      if (msg.type === 'turn_complete') setIsProcessing(false)
+      if (msg.type === 'text') setDisplayMessages(prev => [...prev, msg.data].slice(-10))
+      if (msg.type === 'transcript') {
+        // Transcription arrives in fragments — grow one bubble per spoken turn.
+        const appendToLast = captionOpenRef.current
+        captionOpenRef.current = true
+        setDisplayMessages(prev =>
+          appendToLast && prev.length > 0
+            ? [...prev.slice(0, -1), prev[prev.length - 1] + msg.data]
+            : [...prev, msg.data.trimStart()].slice(-10)
+        )
+      }
+      if (msg.type === 'turn_complete') {
+        setIsProcessing(false)
+        captionOpenRef.current = false
+      }
       if (msg.type === 'screen_share_request') setShareRequested(true)
       if (msg.type === 'draw_diagram') {
         try {
@@ -122,7 +131,6 @@ export default function Home() {
         }
       }
     }
-    lastProcessedMsgRef.current = messages.length
   }, [messages])
 
   useEffect(() => {
@@ -202,6 +210,7 @@ export default function Home() {
     setIsProcessing(false)
     setSessionMode('LISTENING')
     setDisplayMessages([])
+    captionOpenRef.current = false
   }
 
   const revertToCamera = useCallback(() => {
@@ -322,15 +331,15 @@ export default function Home() {
             </div>
           ) : null}
 
-          {!canvasDiagram && (
-            <CameraView
-              videoRef={videoRef}
-              fit={videoSource === 'screen' ? 'contain' : 'cover'}
-              mirrored={videoSource === 'camera' && facingMode === 'user'}
-              isActive={isActive}
-              error={cameraError}
-            />
-          )}
+          {/* Keep the camera mounted under the diagram — unmounting it swaps in
+              a fresh <video> with no srcObject, leaving Nux blind after "Back to view". */}
+          <CameraView
+            videoRef={videoRef}
+            fit={videoSource === 'screen' ? 'contain' : 'cover'}
+            mirrored={videoSource === 'camera' && facingMode === 'user'}
+            isActive={isActive}
+            error={cameraError}
+          />
           {canvasDiagram && (
             <DiagramCanvas diagram={canvasDiagram} onClose={() => setCanvasDiagram(null)} />
           )}

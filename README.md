@@ -6,6 +6,8 @@
 
 Nux runs continuously in one live session. Point your camera, share your screen when you choose, speak naturally, and the agent sees what you show it, remembers what you ask it to, and draws diagrams when you need to go deeper. Not a chatbot. A collaborative presence — it works alongside you, not instead of you.
 
+> **Formerly Sightline.** This project was rebranded from **Sightline** to **Nux** on 27 August 2026 (commit `fb38548`). The GitHub repo moved from `rkchellah/Sightline` to [`rkchellah/Nux`](https://github.com/rkchellah/Nux) (old links redirect). The deployed Google Cloud resources — GCP project `sightline-2026` and Cloud Run services `sightline-frontend` / `sightline-backend` — keep their original names, because renaming them would change the live URLs. Wherever you see `sightline` below, it refers to those infrastructure identifiers, not the product name.
+
 ---
 
 ## Live Demo
@@ -31,6 +33,7 @@ One continuous WebSocket session handles everything:
 5. **Memory** — Firestore vector search; save and recall facts across sessions
 6. **Drawing canvas** — labeled SVG diagrams when you ask it to visualize a concept
 7. **Turn management** — mic mutes while the agent speaks, reopens on `turn_complete`
+8. **Captions** — Gemini's speech is transcribed live and shown on screen
 
 ---
 
@@ -97,17 +100,17 @@ flowchart TB
 | **WebSocket** | One long-lived connection per user — mic audio, camera/screen JPEG frames, Gemini audio back, tool side-effects (`turn_complete`, diagram JSON, share prompt). |
 | **Gemini Live** | Sees frames, hears speech, speaks responses, invokes tools. Session loop keeps `receive()` alive across turns. |
 | **Firestore** | Stores distilled text memories with embeddings only — never raw video or audio. |
-| **Cloud Run** | `sightline-frontend` (port 3000) and `sightline-backend` (port 8080) in `europe-west1`, GCP project `sightline-2026`. Ping/pong every ~20s avoids proxy idle timeouts. |
+| **Cloud Run** | `sightline-frontend` (port 3000) and `sightline-backend` (port 8080) in `europe-west1`, GCP project `sightline-2026` (legacy names from before the rebrand). Ping/pong every ~20s avoids proxy idle timeouts. |
 
-**Deployed today:** UI brand is **Nux**. Hosted on free Cloud Run URLs (`*.run.app`). GCP project `sightline-2026`, services `sightline-frontend` / `sightline-backend`. Custom domain is optional and not required.
+**Deployed today:** Nux is hosted on free Cloud Run URLs (`*.run.app`) under the pre-rebrand resource names: GCP project `sightline-2026`, services `sightline-frontend` / `sightline-backend`. A custom domain is optional and not required.
 
 ---
 
 ## Running locally
 
 ```bash
-git clone https://github.com/rkchellah/sightline.git
-cd sightline
+git clone https://github.com/rkchellah/Nux.git
+cd Nux
 ```
 
 **Backend:**
@@ -148,7 +151,7 @@ If the button stays on **Connecting…**, the backend is not reachable at `NEXT_
 
 ## Deploy (Cloud Run)
 
-From the repo root, build and deploy both services:
+From the repo root, build and deploy both services. The project, image and service names below still use the legacy `sightline` prefix (see the rebrand note above) — they must match the existing GCP resources, so don't rename them in commands unless you are also migrating the infrastructure.
 
 ```bash
 gcloud builds submit --config=cloudbuild.yaml --project=sightline-2026
@@ -223,7 +226,7 @@ self.client = genai.Client(
 ## Project structure
 
 ```
-sightline/                         # repo folder; product UI is Nux
+Nux/
 ├── backend/
 │   └── app/
 │       ├── main.py                    — FastAPI entry point

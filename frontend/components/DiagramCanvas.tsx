@@ -4,6 +4,7 @@
 function sanitizeSvg(raw: string): string {
   return raw
     .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
     .replace(/\bon\w+\s*=/gi, 'data-blocked=')
     .replace(/javascript:/gi, '')
 }
@@ -28,20 +29,22 @@ export function DiagramCanvas({ diagram, onClose }: DiagramCanvasProps) {
   const svgMarkup = sanitizeSvg(normalizeSvg(diagram.svg))
 
   return (
-    <div className="sl-canvas-overlay">
-      <div className="sl-canvas-border" />
-      <div className="sl-canvas-header">
-        <span className="sl-canvas-pill-dot" />
-        <span className="sl-canvas-pill-label">Drawing</span>
-        <h2 className="sl-canvas-title">{diagram.title}</h2>
+    <div className="nux-canvas" role="dialog" aria-label={`Diagram: ${diagram.title}`}>
+      <div className="nux-canvas-border" />
+      <div className="nux-canvas-header">
+        <div className="nux-canvas-pill">
+          <span className="nux-canvas-pill-dot" />
+          <span className="nux-canvas-pill-label">Drawing</span>
+        </div>
+        <h2 className="nux-canvas-title">{diagram.title}</h2>
+        <button type="button" className="nux-canvas-close" onClick={onClose}>
+          Back to view
+        </button>
       </div>
       <div
-        className="sl-canvas-svg-wrap"
+        className="nux-canvas-svg"
         dangerouslySetInnerHTML={{ __html: svgMarkup }}
       />
-      <button type="button" className="sl-canvas-close-btn" onClick={onClose}>
-        Back to view
-      </button>
     </div>
   )
 }

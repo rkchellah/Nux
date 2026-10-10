@@ -1,6 +1,8 @@
 # Nux frontend
 
-Next.js UI for **Nux** — landing page, live session (camera / mic / screen), Trust & How-to drawers.
+Next.js UI for **Nux** (formerly Sightline) — landing page, live session (camera / mic / screen), Trust & How-to drawers.
+
+The production backend URL fallbacks in `lib/config.ts` and `hooks/useWebSocket.ts` still point at the `sightline-backend` Cloud Run service — that's the pre-rebrand infrastructure name, not a leftover to rename. The legacy `sightline_user_id` localStorage key is copied to the current key on first load, so returning users keep their memories.
 
 ## Dev
 

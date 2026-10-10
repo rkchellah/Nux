@@ -8,6 +8,9 @@ export type WSMessage = {
   data: string
 }
 
+/** Inbound message tagged with a monotonically increasing sequence number. */
+export type ReceivedMessage = WSMessage & { seq: number }
+
 const WS_URL =
   process.env.NEXT_PUBLIC_WS_URL ??
   'wss://sightline-backend-59597652459.europe-west1.run.app/ws'
@@ -17,7 +20,10 @@ const CLIENT_PING_MS = 20_000
 
 export function useWebSocket(voiceName: string) {
   const [isConnected, setIsConnected] = useState(false)
-  const [messages, setMessages] = useState<WSMessage[]>([])
+  const [messages, setMessages] = useState<ReceivedMessage[]>([])
+  // The list is capped, so its length stops growing — consumers must track
+  // progress by seq, not by array index.
+  const seqRef = useRef(0)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -84,7 +90,8 @@ export function useWebSocket(voiceName: string) {
           }
           if (msg.type === 'pong') return
 
-          setMessages(prev => [...prev.slice(-30), msg])
+          const received = { ...msg, seq: ++seqRef.current }
+          setMessages(prev => [...prev.slice(-30), received])
         } catch (e) {
           console.error('Failed to parse message:', e)
         }
